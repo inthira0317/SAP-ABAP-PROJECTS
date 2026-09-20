@@ -1,0 +1,453 @@
+*&---------------------------------------------------------------------*
+*& Report ZMM_MAT_ALV
+*&---------------------------------------------------------------------*
+REPORT zmm_mat_alv.
+
+TYPE-POOLS: slis.
+
+TABLES: ekpo, ekko, lfa1.
+
+*---------------------------------------------------------------------*
+* Selection Screen
+*---------------------------------------------------------------------*
+SELECT-OPTIONS: s_matnr FOR ekpo-matnr.
+
+*---------------------------------------------------------------------*
+* Output Structure
+*---------------------------------------------------------------------*
+TYPES: BEGIN OF ty_output,
+         matnr       TYPE ekpo-matnr,
+         maktx       TYPE makt-maktx,
+         po_no       TYPE ekpo-ebeln,
+         po_item     TYPE ekpo-ebelp,
+         po_text     TYPE ekpo-txz01,
+         po_qty      TYPE ekpo-menge,
+         po_amount   TYPE ekpo-netwr,
+         vendor_code TYPE ekko-lifnr,
+         vendor_name TYPE lfa1-name1,
+         vendor_gst  TYPE lfa1-stcd5,
+
+         "Cell color information
+         cell_color  TYPE slis_t_specialcol_alv,
+
+       END OF ty_output.
+
+*---------------------------------------------------------------------*
+* Data Declarations
+*---------------------------------------------------------------------*
+DATA: gt_output TYPE STANDARD TABLE OF ty_output,
+      gs_output TYPE ty_output,
+
+      gt_fcat   TYPE slis_t_fieldcat_alv,
+      gs_fcat   TYPE slis_fieldcat_alv,
+
+      gt_sort   TYPE slis_t_sortinfo_alv,
+      gs_sort   TYPE slis_sortinfo_alv,
+
+      gs_layout TYPE slis_layout_alv.
+
+*---------------------------------------------------------------------*
+* Execution Block
+*---------------------------------------------------------------------*
+START-OF-SELECTION.
+
+  PERFORM get_data.
+  PERFORM build_fieldcat.
+  PERFORM build_sort_criteria.
+  PERFORM set_layout.
+  PERFORM display_alv.
+
+*---------------------------------------------------------------------*
+*& Form get_data
+*---------------------------------------------------------------------*
+FORM get_data.
+
+  CLEAR gt_output.
+
+  SELECT
+      ekpo~matnr,
+      makt~maktx,
+      ekpo~ebeln AS po_no,
+      ekpo~ebelp AS po_item,
+      ekpo~txz01 AS po_text,
+      ekpo~menge AS po_qty,
+      ekpo~netwr AS po_amount,
+      ekko~lifnr AS vendor_code,
+      lfa1~name1 AS vendor_name,
+      lfa1~stcd5 AS vendor_gst
+
+    FROM ekpo
+
+    INNER JOIN ekko
+      ON ekko~ebeln = ekpo~ebeln
+
+    LEFT OUTER JOIN makt
+      ON makt~matnr = ekpo~matnr
+     AND makt~spras = @sy-langu
+
+    LEFT OUTER JOIN lfa1
+      ON lfa1~lifnr = ekko~lifnr
+
+    WHERE ekpo~matnr IN @s_matnr
+      AND ekpo~menge > 0
+      AND ekpo~netwr > 0
+
+    INTO CORRESPONDING FIELDS OF TABLE @gt_output.
+
+*---------------------------------------------------------------------*
+* No data check
+*---------------------------------------------------------------------*
+
+  IF gt_output IS INITIAL.
+
+    MESSAGE 'No Purchase Order found for selected Material'
+            TYPE 'I'.
+
+    LEAVE LIST-PROCESSING.
+
+  ENDIF.
+
+*---------------------------------------------------------------------*
+* Sort data
+*---------------------------------------------------------------------*
+
+  SORT gt_output BY matnr po_no po_item.
+
+*---------------------------------------------------------------------*
+* Set Net Amount cell color
+*---------------------------------------------------------------------*
+
+  LOOP AT gt_output INTO gs_output.
+
+    CLEAR gs_output-cell_color.
+
+    DATA: ls_color TYPE slis_specialcol_alv.
+
+    CLEAR ls_color.
+
+    ls_color-fieldname = 'PO_AMOUNT'.
+
+    IF gs_output-po_amount > 5000.
+
+      "Red / warning type color
+      ls_color-color-col = 6.
+      ls_color-color-int = 1.
+      ls_color-color-inv = 0.
+
+    ELSE.
+
+      "Green type color
+      ls_color-color-col = 5.
+      ls_color-color-int = 1.
+      ls_color-color-inv = 0.
+
+    ENDIF.
+
+    APPEND ls_color TO gs_output-cell_color.
+
+    MODIFY gt_output FROM gs_output
+           TRANSPORTING cell_color.
+
+  ENDLOOP.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+*& Form build_fieldcat
+*---------------------------------------------------------------------*
+FORM build_fieldcat.
+
+*---------------------------------------------------------------------*
+* Material Number
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos       = 1.
+  gs_fcat-fieldname     = 'MATNR'.
+  gs_fcat-seltext_m     = 'Material Number'.
+  gs_fcat-ref_tabname   = 'EKPO'.
+  gs_fcat-ref_fieldname = 'MATNR'.
+  gs_fcat-key           = 'X'.
+  gs_fcat-hotspot       = 'X'.
+  gs_fcat-emphasize     = 'C110'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* Material Description
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 2.
+  gs_fcat-fieldname = 'MAKTX'.
+  gs_fcat-seltext_m = 'Material Description'.
+  gs_fcat-emphasize = 'C200'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* PO Number
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 3.
+  gs_fcat-fieldname = 'PO_NO'.
+  gs_fcat-seltext_m = 'PO Number'.
+  gs_fcat-hotspot   = 'X'.
+  gs_fcat-key       = 'X'.
+  gs_fcat-emphasize = 'C410'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* PO Item
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 4.
+  gs_fcat-fieldname = 'PO_ITEM'.
+  gs_fcat-seltext_m = 'PO Item'.
+  gs_fcat-emphasize = 'C400'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* Short Text
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 5.
+  gs_fcat-fieldname = 'PO_TEXT'.
+  gs_fcat-seltext_m = 'Short Text'.
+  gs_fcat-emphasize = 'C210'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* Quantity
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 6.
+  gs_fcat-fieldname = 'PO_QTY'.
+  gs_fcat-seltext_m = 'Quantity'.
+  gs_fcat-emphasize = 'C310'.
+
+  "No do_sum here
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* Net Amount
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 7.
+  gs_fcat-fieldname = 'PO_AMOUNT'.
+  gs_fcat-seltext_m = 'Net Amount'.
+  gs_fcat-emphasize = 'C510'.
+
+  "Grand Total
+  gs_fcat-do_sum = 'X'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* Vendor Code
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 8.
+  gs_fcat-fieldname = 'VENDOR_CODE'.
+  gs_fcat-seltext_m = 'Vendor Code'.
+  gs_fcat-hotspot   = 'X'.
+  gs_fcat-emphasize = 'C710'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* Vendor Name
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 9.
+  gs_fcat-fieldname = 'VENDOR_NAME'.
+  gs_fcat-seltext_m = 'Vendor Name'.
+  gs_fcat-emphasize = 'C700'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+*---------------------------------------------------------------------*
+* Vendor GST
+*---------------------------------------------------------------------*
+
+  CLEAR gs_fcat.
+
+  gs_fcat-col_pos   = 10.
+  gs_fcat-fieldname = 'VENDOR_GST'.
+  gs_fcat-seltext_m = 'Vendor GSTIN'.
+  gs_fcat-emphasize = 'C610'.
+
+  APPEND gs_fcat TO gt_fcat.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+*& Form build_sort_criteria
+*---------------------------------------------------------------------*
+FORM build_sort_criteria.
+
+  CLEAR gs_sort.
+
+  gs_sort-fieldname = 'MATNR'.
+  gs_sort-up        = 'X'.
+
+  "No subtotal
+  gs_sort-subtot    = space.
+
+  APPEND gs_sort TO gt_sort.
+
+  CLEAR gs_sort.
+
+  gs_sort-fieldname = 'PO_NO'.
+  gs_sort-up        = 'X'.
+
+  "No subtotal
+  gs_sort-subtot    = space.
+
+  APPEND gs_sort TO gt_sort.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+*& Form set_layout
+*---------------------------------------------------------------------*
+FORM set_layout.
+
+  CLEAR gs_layout.
+
+  gs_layout-zebra             = 'X'.
+  gs_layout-colwidth_optimize = 'X'.
+
+  "Important:
+  "Use CELL_COLOR instead of ROW_COLOR
+  gs_layout-coltab_fieldname  = 'CELL_COLOR'.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+*& Form display_alv
+*---------------------------------------------------------------------*
+FORM display_alv.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+
+    EXPORTING
+
+      i_grid_title            = 'Material Purchase Order Summary'
+
+      i_callback_program      = sy-repid
+
+      i_callback_user_command = 'USER_COMMAND'
+
+      is_layout               = gs_layout
+
+      it_fieldcat             = gt_fcat
+
+      it_sort                 = gt_sort
+
+    TABLES
+
+      t_outtab                = gt_output
+
+    EXCEPTIONS
+
+      program_error            = 1
+      OTHERS                   = 2.
+
+  IF sy-subrc <> 0.
+
+    MESSAGE 'Error displaying ALV Grid' TYPE 'E'.
+
+  ENDIF.
+
+ENDFORM.
+
+*---------------------------------------------------------------------*
+*& Form USER_COMMAND
+*---------------------------------------------------------------------*
+FORM user_command USING r_ucomm LIKE sy-ucomm
+                        rs_selfield TYPE slis_selfield.
+
+  CASE r_ucomm.
+
+*---------------------------------------------------------------------*
+* Double Click
+*---------------------------------------------------------------------*
+
+    WHEN '&IC1'.
+
+      CASE rs_selfield-fieldname.
+
+*---------------------------------------------------------------------*
+* Material Number -> MM03
+*---------------------------------------------------------------------*
+
+        WHEN 'MATNR'.
+
+          IF rs_selfield-value IS NOT INITIAL.
+
+            SET PARAMETER ID 'MAT'
+                FIELD rs_selfield-value.
+
+            CALL TRANSACTION 'MM03'
+                 AND SKIP FIRST SCREEN.
+
+          ENDIF.
+
+*---------------------------------------------------------------------*
+* PO Number -> ME23N
+*---------------------------------------------------------------------*
+
+        WHEN 'PO_NO'.
+
+          IF rs_selfield-value IS NOT INITIAL.
+
+            SET PARAMETER ID 'BES'
+                FIELD rs_selfield-value.
+
+            CALL TRANSACTION 'ME23N'
+                 AND SKIP FIRST SCREEN.
+
+          ENDIF.
+
+*---------------------------------------------------------------------*
+* Vendor -> XK03
+*---------------------------------------------------------------------*
+
+        WHEN 'VENDOR_CODE'.
+
+          IF rs_selfield-value IS NOT INITIAL.
+
+            SET PARAMETER ID 'LIF'
+                FIELD rs_selfield-value.
+
+            CALL TRANSACTION 'XK03'
+                 AND SKIP FIRST SCREEN.
+
+          ENDIF.
+
+      ENDCASE.
+
+  ENDCASE.
+
+ENDFORM. 
+
